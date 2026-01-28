@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Generator
 
 WINDOW_30D = timedelta(days=30)
+GRACE_PERIOD = timedelta(days=5)
 
 #This function is the simulated producer.
 #Simulates a Kafka topic emitting transaction events. 
@@ -67,8 +68,7 @@ class StateStore:
     def get_customer(self, customer_id: str) -> Dict:
         if customer_id not in self.balances:
             self.balances[customer_id] = {
-                "daily_sums": {},
-                "features": {}
+                "daily_sums": {}  # {date: {"amount": float, "count": int}}
             }
         return self.balances[customer_id]
     
@@ -80,9 +80,10 @@ class StateStore:
         
         # If date exists, add to it; otherwise create new entry
         if date_key not in customer["daily_sums"]:
-            customer["daily_sums"][date_key] = 0.0
-        
-        customer["daily_sums"][date_key] += event["amount"]
+            customer["daily_sums"][date_key] = {"amount": 0.0, "count": 0}
+
+        customer["daily_sums"][date_key]["amount"] += event["amount"]
+        customer["daily_sums"][date_key]["count"] += 1
     
     def evict_old_events(self, customer_id: str, cutoff: datetime):
         customer = self.get_customer(customer_id)
@@ -99,12 +100,16 @@ class FeatureBuilder:
         self.state_store = state_store
     
     def _evict_old_events(self, customer_id, reference_time: datetime):
-        cutoff = reference_time - WINDOW_30D
+        cutoff = reference_time - WINDOW_30D - GRACE_PERIOD
         self.state_store.evict_old_events(customer_id,cutoff)
 
     def _compute_features(self, customer_id) -> Dict:
         customer = self.state_store.get_customer(customer_id)
         events = customer["daily_sums"]
+
+        print(f"  Daily sums: {list(events.keys())}")
+        print(f"  Counts: {[(k, v['count']) for k, v in events.items()]}")
+    
 
         if not events:
             return {
@@ -113,8 +118,8 @@ class FeatureBuilder:
                 "avg_amount_30d": 0.0,
             }
 
-        total_txn = len(events)
-        total_amount = sum(events.values())
+        total_txn = sum(event["count"] for event in events.values())
+        total_amount = sum(event["amount"] for event in events.values())
 
         return {
             "total_txn_30d": total_txn,
@@ -184,9 +189,10 @@ def main():
     for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=1)):
         for _, events in customer_batches.items():
             for event in events:
-                print("Processing event:", event["event_id"], 
-                "time:", event["event_time"])
-                print(f"Feature update: {feature_builder.process_event(event)}")
+                print("Processing event:", event["event_id"], "time:", 
+                      datetime.fromisoformat(event["event_time"]), 
+                      "amount:", event["amount"])
+                print(f"Feature update: {feature_builder.process_event(event)}\n")
 
 if __name__ == "__main__":
     main()
