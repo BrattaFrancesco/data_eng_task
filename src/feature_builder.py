@@ -14,7 +14,11 @@ def simulated_kafka_stream(
     events_per_customer: int = 10,
     duplicate_rate: float = 0.1,
     out_of_order_rate: float = 0.3,
+    seed=None,
 ) -> Generator[Dict, None, None]:
+
+    if seed is not None:
+        random.seed(seed) 
 
     base_time = datetime.now(tz=timezone.utc)
     events: List[Dict] = []
@@ -186,7 +190,7 @@ def main():
     state_store = StateStore()
     feature_builder = FeatureBuilder(state_store)
 
-    for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=1)):
+    for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=1)): ## Use seed to show replyability
         for _, events in customer_batches.items():
             for event in events:
                 print("Processing event:", event["event_id"], "time:", 
