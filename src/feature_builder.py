@@ -1,7 +1,19 @@
 import random
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Generator
+
+# Configure logging to file and console
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('feature_builder.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 WINDOW_30D = timedelta(days=30)
 GRACE_PERIOD = timedelta(days=5)
@@ -135,17 +147,34 @@ class FeatureBuilder:
         # basic validation
         required_fields = {"event_id", "customer_id", "event_time", "event_type", "amount"}
         if not required_fields.issubset(event):
+            missing = required_fields - set(event.keys())
+            logger.warning(f"Skipping event - missing fields: {missing}. Event: {event}")
             return
 
         event_id = event["event_id"]
         if self.state_store.is_duplicate(event_id):
+            logger.warning(f"Skipping duplicate event: {event_id}")
             return
 
         self.state_store.mark_seen(event_id)
 
         customer_id = event["customer_id"]
-        event_time = datetime.fromisoformat(event["event_time"].replace("Z", "+00:00"))
+        # Check if event_time is valid
+        try:
+            event_time = datetime.fromisoformat(event["event_time"].replace("Z", "+00:00"))
+        except (ValueError, AttributeError) as e:
+            logger.error(f"Skipping event {event_id} - invalid event_time: {event['event_time']}. Error: {e}")
+            return
 
+        # Check if amount is numeric
+        try:
+            amount = float(event["amount"])
+            if amount < 0:
+                logger.error(f"Skipping event {event_id} - negative amount: {amount}")
+                return
+        except (ValueError, TypeError) as e:
+            logger.error(f"Skipping event {event_id} - invalid amount: {event['amount']}. Error: {e}")
+            return
         self.state_store.update_daily_sum(customer_id, event)
 
         if not hasattr(self, 'max_event_time'):
