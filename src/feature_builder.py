@@ -151,6 +151,12 @@ class FeatureBuilder:
             logger.warning(f"Skipping event - missing fields: {missing}. Event: {event}")
             return
 
+        # Validate customer_id format: "C" followed by 3 digits
+        customer_id = event["customer_id"]
+        if not isinstance(customer_id, str) or len(customer_id) != 4 or customer_id[0] != "C" or not customer_id[1:].isdigit():
+            logger.warning(f"Skipping event - invalid customer_id format: {customer_id}. Expected format: C###")
+            return
+
         event_id = event["event_id"]
         if self.state_store.is_duplicate(event_id):
             logger.warning(f"Skipping duplicate event: {event_id}")
