@@ -2,8 +2,11 @@ import json
 import random
 import uuid
 import logging
+from xml.parsers.expat import model
+import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Generator
+import xgboost as xgb
 
 # Configure logging to file and console
 logging.basicConfig(
@@ -101,6 +104,10 @@ class StateStore:
 
         customer["daily_sums"][date_key]["amount"] += event["amount"]
         customer["daily_sums"][date_key]["count"] += 1
+
+    def update_customer_features(self, customer_id: str, features: Dict):
+        customer = self.get_customer(customer_id)
+        customer["features"] = features
     
     def evict_old_events(self, customer_id: str, cutoff: datetime):
         customer = self.get_customer(customer_id)
@@ -110,6 +117,9 @@ class StateStore:
         ]
         for key in keys_to_delete:
             del customer["daily_sums"][key]
+    
+    def get_five_random_customers(self) -> List[str]:
+        return random.sample(list(self.balances.items()), 5)
     
     def save_on_file(self):
         with open("src/data/balances.json", "w") as f:
@@ -133,20 +143,24 @@ class FeatureBuilder:
     
 
         if not events:
-            return {
+            features = {
                 "total_txn_30d": 0,
                 "total_amount_30d": 0.0,
                 "avg_amount_30d": 0.0,
             }
+            self.state_store.update_customer_features(customer_id, features)
+            return features
 
         total_txn = sum(event["count"] for event in events.values())
         total_amount = sum(event["amount"] for event in events.values())
 
-        return {
+        features = {
             "total_txn_30d": total_txn,
             "total_amount_30d": round(total_amount, 2),
             "avg_amount_30d": round(total_amount / total_txn, 2),
         }
+        self.state_store.update_customer_features(customer_id, features)
+        return features
 
     def process_event(self, event: Dict):
         # basic validation
@@ -226,19 +240,39 @@ def batch_by_time_window(kafka_stream, window_size=timedelta(minutes=5)):
     
     return batches.values()
 
+def score_customer(model, features):
+    feature_vector = np.array([[
+        features["total_txn_30d"],
+        features["total_amount_30d"],
+        features["avg_amount_30d"],
+    ]])
+
+    score = model.predict_proba(feature_vector)[0][1]
+    return score
+
 def main():
     state_store = StateStore()
     feature_builder = FeatureBuilder(state_store)
 
-    for customer_batches in batch_by_time_window(simulated_kafka_stream()): ## Use seed to show replyability
+    for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=50, events_per_customer=40)): ## Use seed to show replyability
         for _, events in customer_batches.items():
             for event in events:
                 print("Processing event:", event["event_id"], "time:", 
                       datetime.fromisoformat(event["event_time"]), 
                       "amount:", event["amount"])
                 print(f"Feature update for customer {event['customer_id']}: {feature_builder.process_event(event)}\n")
-    
+
     state_store.save_on_file()
+
+    # Load a saved model
+    model = xgb.XGBClassifier()
+    model.load_model("artifacts/high_value_customer_model.json")
+    
+    # Score a few random customers
+    for customer_id, customer_data in state_store.get_five_random_customers():
+        features = customer_data.get("features", {})
+        score = score_customer(model, features)
+        print(f"Customer {customer_id} score: {score:.4f} with features: {features}")
 
 if __name__ == "__main__":
     main()
