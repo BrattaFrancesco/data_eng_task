@@ -9,7 +9,7 @@ def build_training_dataset(data):
     X = []
     y = []
 
-    threshold = 5000.0  # Threshold for high value customer
+    threshold = 2600.0  # Threshold for high value customer
 
     for _, customer_data in data.items():
         features = customer_data.get("features", {})
@@ -21,13 +21,18 @@ def build_training_dataset(data):
         # Feature vector
         X.append([
             features["total_txn_30d"],
-            features["total_amount_30d"],
             features["avg_amount_30d"],
         ])
 
         # Synthetic label:
-        # Custumer is high value (1) if total amount in last 30 days > $3000
+        # Custumer is high value (1) if total amount in last 30 days > threshold
         label = 1 if total_amount_30d > threshold else 0
+        
+        p_noise = 0.1  # 10% labels flipped randomly
+        # Flip label with probability
+        if np.random.rand() < p_noise:
+            label = 1 - label
+        
         y.append(label)
 
     return np.array(X), np.array(y)
@@ -36,6 +41,7 @@ def train_model(X, y):
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.3, random_state=42
     )
+    X_train,X_val, y_train, y_val = train_test_split(X_train,y_train,train_size = 0.8 )
 
     if len(np.unique(y_train)) < 2:
         print("Training split has only one class:", np.unique(y_train))
@@ -44,13 +50,17 @@ def train_model(X, y):
     model = xgb.XGBClassifier(
         objective="binary:logistic",
         max_depth=3,
-        n_estimators=10,
+        n_estimators=100,
         learning_rate=0.1,
         eval_metric="auc",
         random_state=42,
+        early_stopping_rounds=10,
     )
 
-    model.fit(X_train, y_train)
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_val, y_val)]
+    )
 
     preds = model.predict_proba(X_test)[:, 1]
     auc = roc_auc_score(y_test, preds)
@@ -61,13 +71,13 @@ def train_model(X, y):
 
     return model
 
-def score_customer(model, features):
-    """
-    Score a single customer using latest feature state.
-    """
+def score_customer(model_filename, features):
+
+    model = xgb.XGBClassifier()
+    model.load_model(model_filename)
+
     feature_vector = np.array([[
         features["total_txn_30d"],
-        features["total_amount_30d"],
         features["avg_amount_30d"],
     ]])
 
@@ -79,7 +89,7 @@ def main():
         balances = json.load(f)
     
     X, y = build_training_dataset(balances)
-    model = train_model(X, y)
+    train_model(X, y)
 
 if __name__ == "__main__":
     main()
