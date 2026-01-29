@@ -91,5 +91,5 @@ def main():
     X, y = build_training_dataset(balances)
     train_model(X, y)
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+    #main()
