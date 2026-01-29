@@ -1,3 +1,4 @@
+import json
 import random
 import uuid
 import logging
@@ -9,7 +10,7 @@ logging.basicConfig(
     level=logging.WARNING,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('feature_builder.log'),
+        logging.FileHandler('log/feature_builder.log'),
         logging.StreamHandler()
     ]
 )
@@ -109,6 +110,10 @@ class StateStore:
         ]
         for key in keys_to_delete:
             del customer["daily_sums"][key]
+    
+    def save_on_file(self):
+        with open("src/data/balances.json", "w") as f:
+            json.dump(self.balances, f)
 
 #consumer class that processes events and computes features
 class FeatureBuilder:
@@ -225,13 +230,15 @@ def main():
     state_store = StateStore()
     feature_builder = FeatureBuilder(state_store)
 
-    for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=1)): ## Use seed to show replyability
+    for customer_batches in batch_by_time_window(simulated_kafka_stream()): ## Use seed to show replyability
         for _, events in customer_batches.items():
             for event in events:
                 print("Processing event:", event["event_id"], "time:", 
                       datetime.fromisoformat(event["event_time"]), 
                       "amount:", event["amount"])
-                print(f"Feature update: {feature_builder.process_event(event)}\n")
+                print(f"Feature update for customer {event['customer_id']}: {feature_builder.process_event(event)}\n")
+    
+    state_store.save_on_file()
 
 if __name__ == "__main__":
     main()
