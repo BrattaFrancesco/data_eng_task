@@ -2,19 +2,16 @@ import json
 import random
 import uuid
 import logging
-from xml.parsers.expat import model
-import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Generator
-import xgboost as xgb
+from train_and_score import score_customer
 
 # Configure logging to file and console
 logging.basicConfig(
     level=logging.WARNING,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('log/feature_builder.log'),
-        logging.StreamHandler()
+        logging.FileHandler('log/feature_builder.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -138,8 +135,8 @@ class FeatureBuilder:
         customer = self.state_store.get_customer(customer_id)
         events = customer["daily_sums"]
 
-        print(f"  Daily sums: {list(events.keys())}")
-        print(f"  Counts: {[(k, v['count']) for k, v in events.items()]}")
+        #print(f"  Daily sums: {list(events.keys())}")
+        #print(f"  Counts: {[(k, v['count']) for k, v in events.items()]}")
     
 
         if not events:
@@ -212,9 +209,6 @@ class FeatureBuilder:
 
 # This function simulates batching by 5-minute time windows (tumbling windows).
 def batch_by_time_window(kafka_stream, window_size=timedelta(minutes=5)):
-    """
-    Groups events by 5-minute time buckets (based on event_time, not arrival time)
-    """
     batches = {}  # {window_key: {customer_id: [events]}}
     
     for event in kafka_stream:
@@ -240,38 +234,25 @@ def batch_by_time_window(kafka_stream, window_size=timedelta(minutes=5)):
     
     return batches.values()
 
-def score_customer(model, features):
-    feature_vector = np.array([[
-        features["total_txn_30d"],
-        features["total_amount_30d"],
-        features["avg_amount_30d"],
-    ]])
-
-    score = model.predict_proba(feature_vector)[0][1]
-    return score
-
 def main():
     state_store = StateStore()
     feature_builder = FeatureBuilder(state_store)
 
-    for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=50, events_per_customer=40)): ## Use seed to show replyability
+    for customer_batches in batch_by_time_window(simulated_kafka_stream(num_customers=100, events_per_customer=20)): ## Use seed to show replyability
         for _, events in customer_batches.items():
             for event in events:
-                print("Processing event:", event["event_id"], "time:", 
-                      datetime.fromisoformat(event["event_time"]), 
-                      "amount:", event["amount"])
-                print(f"Feature update for customer {event['customer_id']}: {feature_builder.process_event(event)}\n")
+                #print("Processing event:", event["event_id"], "time:", 
+                #      datetime.fromisoformat(event["event_time"]), 
+                #      "amount:", event["amount"])
+                #print(f"Feature update for customer {event['customer_id']}: {feature_builder.process_event(event)}\n")
+                feature_builder.process_event(event)
 
     state_store.save_on_file()
-
-    # Load a saved model
-    model = xgb.XGBClassifier()
-    model.load_model("artifacts/high_value_customer_model.json")
     
     # Score a few random customers
     for customer_id, customer_data in state_store.get_five_random_customers():
         features = customer_data.get("features", {})
-        score = score_customer(model, features)
+        score = score_customer("artifacts/high_value_customer_model.json", features)
         print(f"Customer {customer_id} score: {score:.4f} with features: {features}")
 
 if __name__ == "__main__":
