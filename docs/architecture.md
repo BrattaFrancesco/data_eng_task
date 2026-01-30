@@ -34,11 +34,7 @@ The system is conceptually organized around one Kafka topic:
 ### Message key strategy
 
 * Kafka **message key**: `customer_id`
-* This ensures:
-
-  * Events for the same customer are routed to the same partition
-  * Per-customer ordering guarantees within a partition
-  * Efficient stateful processing downstream
+* This ensures taht events for the same customer are routed to the same partition
 
 ---
 
@@ -46,9 +42,8 @@ The system is conceptually organized around one Kafka topic:
 
 ### Delivery guarantees
 
-* The system assumes **at-least-once delivery** semantics.
-* Events may be:
-
+* The system assumes **at-least-once delivery** semantics. In this case we don't have networks that can cause lose of data, so the data is always processed at least once.
+* But to simulate the consequences of lost of data, even though it doesn't actually happens, events may be:
   * duplicated
   * delivered out of order
 * This reflects real-world Kafka behavior under retries or failures.
@@ -58,7 +53,7 @@ The system is conceptually organized around one Kafka topic:
 ### Duplicate handling
 
 * Each event contains a globally unique `event_id`.
-* A **deduplication mechanism** tracks processed `event_id`s.
+* A **deduplication mechanism** tracks processed `event_id`, using a idempotent table in the in-memory DynamoDB (that in this case is a simple python set recording all the events that occourred).
 * Events with already-seen IDs are ignored.
 * This makes event processing **idempotent**.
 
@@ -66,56 +61,79 @@ The system is conceptually organized around one Kafka topic:
 
 ### Ordering strategy
 
-* Events are **partitioned by `customer_id`**.
-* Within a partition, Kafka guarantees ordering.
-* Feature computation uses **event time (`event_time`)**, not processing time.
-* Late or out-of-order events are still incorporated correctly into rolling windows.
+* Events are **partitioned by `customer_id`** and they are processed in a window of 5 minutes. In this case it doesn't really matter the ordering of the events, because an event arriving at 10:05 followed by an event at 10:02 in the same day do not change our final result.
+* The partition per `customer_id` ensure us a sort of aggregation per customer done by the window function.
 
 ---
 
 ## 3. State storage
 
-### DynamoDB table design
+### DynamoDB tables design
 
 The system uses a DynamoDB-style key-value store (simulated in memory).
 
-**Table: `customer_feature_state`**
+#### Table: `balances`
 
-| Attribute | Role                                      |
-| --------- | ----------------------------------------- |
-| `PK`      | `CUSTOMER#{customer_id}` (partition key)  |
-| `SK`      | `STATE` or time-based sort key (optional) |
+> **Note** 
+> In the current implementation these informations are stored in one single table, as you can see in the item example. This is a design choice to simplify the development, since the architectural part was not covered in the assesment cretarias. In a real world scenario, the daily aggratates and the features should be included or not in the main table depending on the system requirements. It is obvious that the implemented case it is faster, since it doesn't require any join between tables, but is not scalable. In the schema I will show what conceptually makes more sense to me, but then as I said, in reality the implementation can change based on the system requirements.
 
-**Stored state includes:**
+##### Customer
+| Attribute    | Type | Description |
+|-------------|------|-------------|
+| `customer_id` | String `PK` | Unique customer identifier |
+|... | | |
+| `name` | optional | optional |
+| `surname` | optional | optional |
+| ... | optional | optional |
 
-* Rolling feature aggregates (e.g. 30-day windows)
-* Last processed event timestamp
-* Optional version metadata
+##### MonthlyFeatures
+| Attribute    | Type | Description |
+|-------------|------|-------------|
+| `customer_id` | String `FK` | Unique customer identifier |
+| `total_transactions`       | Integer | Total transactions in the last 30 days |
+| `total_amount`             | Decimal | Total transaction amount in the last 30 days |
+| `average_transaction_amount` | Decimal | Mean amount per transaction over 30 days |
 
-Example item:
+##### DailyAggregate
+| Attribute          | Type    | Description |
+|------------------|---------|-------------|
+| `date`            | Date `PK`   | Transaction day (YYYY-MM-DD) |
+| `customer_id` | String `FK` | Unique customer identifier |
+| `total_amount`    | Decimal | Sum of transaction amounts for the day |
+| `transaction_count` | Integer | Number of transactions for the day |
 
+
+#### Item example:
 ```json
-{
-  "PK": "CUSTOMER#C123",
-  "features": {
-    "total_txn_30d": 12,
-    "total_amount_30d": 842.5,
-    "avg_amount_30d": 70.21
-  },
-  "last_event_time": "2025-01-01T10:05:00Z",
-  "version": 17
+{"C000": 
+    {"daily_sums": {
+        "2026-01-19": {"amount": 380.65, "count": 2}, 
+        "2026-01-26": {"amount": 341.64, "count": 2},
+        ...
+        "2026-01-27": {"amount": 176.41, "count": 1}
+    }, 
+    "features": {
+        "total_txn_30d": 16, 
+        "total_amount_30d": 3065.21,
+        "avg_amount_30d": 191.58
+    }
 }
 ```
 
+#### Table: `seen_events`
+
+This table ensure the idempotency. With a small memory and reading cost, the system is able to understand if a certain event have been processed already, and avoids duplicates.
+
+##### 
+| Attribute    | Type | Description |
+|-------------|------|-------------|
+| `event_id` | String `PK` | The id of an event that have been already processed |
 ---
 
 ### Concurrent updates
 
-* Updates are logically serialized by partitioning on `customer_id`.
-* In a real DynamoDB setup, concurrency would be handled using:
-
-  * **optimistic locking**
-  * a `version` attribute with conditional writes (`ConditionExpression`)
+* In our toy system, there are not concurrent updates to manage, considering that we have one single program, with one single process.
+* In a real DynamoDB setup, concurrency would be handled using Optimistic locking. Optimistic locking uses a version number on each item to ensure updates only succeed if the item hasn’t been modified by others, preventing accidental overwrites and requiring a retry if a version mismatch occurs.
 * This prevents lost updates when multiple consumers process the same customer concurrently.
 
 ---
@@ -125,22 +143,7 @@ Example item:
 ### Model artifact storage
 
 * Trained models are saved as serialized artifacts (e.g. `high_value_customer_model.json`).
-* Artifacts are stored alongside the code or in a shared artifact store (e.g. S3 in production).
-
----
-
-### Versioning strategy
-
-* Each trained model is versioned explicitly:
-
-  * filename includes version or timestamp
-  * metadata records training date and feature schema
-* Example:
-
-  ```
-  high_value_customer_model_v1.json
-  high_value_customer_model_v2.json
-  ```
+* Artifacts are stored alongside the code or in a shared artifact store.
 
 ---
 
@@ -161,12 +164,12 @@ Example item:
 
 ### Rebuilding features from event history
 
-* The **event log is the source of truth**.
-* Feature state can be rebuilt by:
+* Theoretically the **event log is the source of truth**.
+* The system is able to recompute from scratch all the features in a consistent way.
+* Since the system is simulated using a random genarator, it doesn't acutally read event from a log, but it can produce the same input setting a seed in the `simulated_kafka_stream()` function.
 
-  1. Clearing the state store
-  2. Replaying all events from the beginning
-  3. Recomputing features deterministically
+> **Note**
+> The choice of random generated input was done in order to further train easily the model. In this way I didn't have to write manually the data, but generating it automatically, with my parameters of choice. The seed helped me to understand if the final features where calculated in the same way (setting up a seed forces the generator to produce always the same input, random is actually pseudorandom, but this we all know :P)
 
 This supports:
 
@@ -180,7 +183,7 @@ This supports:
 
 For large-scale backfills in production, the system would:
 
-* Read historical events from durable storage (Kafka with long retention or object storage like S3)
+* Read historical events from durable storage (Kafka with long retention)
 * Process events in parallel using:
 
   * batch jobs (e.g. Spark / Flink)
