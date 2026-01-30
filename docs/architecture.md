@@ -142,8 +142,8 @@ This table ensure the idempotency. With a small memory and reading cost, the sys
 
 ### Model artifact storage
 
-* Trained models are saved as serialized artifacts (e.g. `high_value_customer_model.json`).
-* Artifacts are stored alongside the code or in a shared artifact store.
+* Trained models are saved as serialized artifacts (e.g. `artifacts/high_value_customer_model.json`).
+* Everytime we train a new model, the old one is versioned usign the timestamp of the training execution so it can be used in the future again.
 
 ---
 
@@ -151,12 +151,11 @@ This table ensure the idempotency. With a small memory and reading cost, the sys
 
 * New models are deployed by:
 
-  * updating the model artifact reference
+  * updating the model artifact reference using the function `train()`
+  * binding a folder at container running time using the command:
+  `docker run --mount type=bind,src=./artifacts,dst=/artifacts streaming-score`, in this way we bind a host local folder to the container one in order to update the model whenever we want
   * restarting the scoring service/container
-* Rollback is achieved by:
-
-  * switching back to a previous model artifact
-* No state migration is required because features are computed independently of the model.
+* Rollback is achieved by switching back to a previous model artifact
 
 ---
 
