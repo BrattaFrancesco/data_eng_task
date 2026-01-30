@@ -61,8 +61,8 @@ The system is conceptually organized around one Kafka topic:
 
 ### Ordering strategy
 
-* Events are **partitioned by `customer_id`** and they are processed in a window of 5 minutes. In this case it doesn't really matter the ordering of the events, because an event arriving at 10:05 followed by an event at 10:02 in the same day do not change our final result.
-* The partition per `customer_id` ensure us a sort of aggregation per customer done by the window function.
+* I partitioned by customer_id (simulated with the window function), which ensures that all events for the same customer are delivered to the same partition, giving us per-customer ordering
+* Still, given the random shuffle I did in the simulated input, some events arrive late. Keeping track of the last event_time, the system is able to evict all the dates amounts that are out of the 30days window, usign `evict_old_events()`
 
 ---
 

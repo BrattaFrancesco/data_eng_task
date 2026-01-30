@@ -17,7 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WINDOW_30D = timedelta(days=30)
-GRACE_PERIOD = timedelta(days=5)
 
 #This function is the simulated producer.
 #Simulates a Kafka topic emitting transaction events. 
@@ -126,9 +125,10 @@ class StateStore:
 class FeatureBuilder:
     def __init__(self, state_store: StateStore):
         self.state_store = state_store
+        self.max_event_time = None
     
     def _evict_old_events(self, customer_id, reference_time: datetime):
-        cutoff = reference_time - WINDOW_30D - GRACE_PERIOD
+        cutoff = reference_time - WINDOW_30D
         self.state_store.evict_old_events(customer_id,cutoff)
 
     def _compute_features(self, customer_id) -> Dict:
@@ -173,6 +173,7 @@ class FeatureBuilder:
             logger.warning(f"Skipping event - invalid customer_id format: {customer_id}. Expected format: C###")
             return
 
+        # Check if event is duplicate
         event_id = event["event_id"]
         if self.state_store.is_duplicate(event_id):
             logger.warning(f"Skipping duplicate event: {event_id}")
@@ -199,11 +200,13 @@ class FeatureBuilder:
             return
         self.state_store.update_daily_sum(customer_id, event)
 
-        if not hasattr(self, 'max_event_time'):
+        # Set latest event time seen
+        if self.max_event_time is None:
             self.max_event_time = event_time
         else:
             self.max_event_time = max(self.max_event_time, event_time)
 
+        # Evict old events beyond 30 days from the latest event time seen
         self._evict_old_events(customer_id, self.max_event_time)
         return self._compute_features(customer_id)
 
