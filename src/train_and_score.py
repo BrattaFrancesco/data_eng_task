@@ -1,4 +1,6 @@
 import json
+import os
+from datetime import datetime
 import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
@@ -67,6 +69,13 @@ def train_model(X, y):
 
     print(f"AUC: {auc:.3f}")
 
+    if os.path.exists("artifacts/high_value_customer_model.json"):
+        # Create a versioned name based on timestamp
+        base, ext = os.path.splitext("artifacts/high_value_customer_model.json")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file_path = f"{base}_v{timestamp}{ext}"
+        os.rename("artifacts/high_value_customer_model.json", backup_file_path)
+    
     model.save_model("artifacts/high_value_customer_model.json")
 
     return model
@@ -84,12 +93,12 @@ def score_customer(model_filename, features):
     score = model.predict_proba(feature_vector)[0][1]
     return score
 
-def main():
+def train():
     with open("src/data/balances.json", "r") as f:
         balances = json.load(f)
     
     X, y = build_training_dataset(balances)
     train_model(X, y)
 
-#if __name__ == "__main__":
-    #main()
+if __name__ == "__main__":
+    train()
