@@ -6,4 +6,4 @@
 3. What assumptions did you make that could be wrong?
     I think probably on the way I imagined and simulated the streaming of the data. I am not 100% sure the way I implemented it can simulate a streaming and easly replaced with a real word scenario.
 4. What trade-offs did you consciously accept?
-    For sure the way I designed the database, could be more sofisticated, but is a good trade-off in this case. The other trade-off that increased the simplicity of the development was the choise of the threshold fot the synthetic labelling.
+    For sure the way I designed the database, could be more sofisticated, but is a good trade-off in this case. The other trade-off that increased the simplicity of the development was the choise of the threshold fot the synthetic labelling. Furthermore, I chose to not create an long loop that streams data, so in this sense is more a batch processing that is implemented as a streaming one, it looked more simple in my head to implement this type of simulation.
