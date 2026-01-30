@@ -1,4 +1,9 @@
 1. What part of the task was hardest, and why?
+    The hardest part was understanding what to do exaclty and how to put that together. Especially, the problem I had was mainly with the simulated Kafka stream. Simulating it 100% is hard, and I don't think I completely achieve it, expecially the out-of-order part. I think this is the weakest point of my implementation, and for sure is a lack that I can fill if I would study more the concepts of Kafka.
+    Another challenge was the training on the synthetich data. At the beginning I thought that this random generation would have helped me, but now I think that for how .random() works it made it worse. I guess is because the values are distributed in a certain way, meaning that they are probably too much evenly ditributed, causing overfitting.
 2. What would you redesign for a real production system?
+    I think I would think and work better on the model part. Experimenting more with real data would be more interesting and challenging. Plus I would consider making the database architecture more easy to scale, here I decided to do more like a toy to keep the code more simple and manage to complete the entire pipeline.
 3. What assumptions did you make that could be wrong?
+    I think probably on the way I imagined and simulated the streaming of the data. I am not 100% sure the way I implemented it can simulate a streaming and easly replaced with a real word scenario.
 4. What trade-offs did you consciously accept?
+    For sure the way I designed the database, could be more sofisticated, but is a good trade-off in this case. The other trade-off that increased the simplicity of the development was the choise of the threshold fot the synthetic labelling.

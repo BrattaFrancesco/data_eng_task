@@ -61,8 +61,8 @@ The system is conceptually organized around one Kafka topic:
 
 ### Ordering strategy
 
-* I partitioned by customer_id (simulated with the window function), which ensures that all events for the same customer are delivered to the same partition, giving us per-customer ordering
-* Still, given the random shuffle I did in the simulated input, some events arrive late. Keeping track of the last event_time, the system is able to evict all the dates amounts that are out of the 30days window, usign `evict_old_events()`
+* I partitioned by customer_id (simulated with the window function), which ensures that all events for the same customer are delivered to the same partition, giving us per-customer ordering. In our case we just process all customer with the same ID within a 5 minutes interval.
+* Still, given the random shuffle I did in the simulated input, some events arrive late. Keeping track of the last event_time, the system is able to evict all the dates amounts that are out of the 30days window, usign `evict_old_events()`.
 
 ---
 
@@ -101,7 +101,7 @@ The system uses a DynamoDB-style key-value store (simulated in memory).
 | `customer_id` | String `FK` | Unique customer identifier |
 | `total_amount`    | Decimal | Sum of transaction amounts for the day |
 | `transaction_count` | Integer | Number of transactions for the day |
-
+The reason behind why we keep track of the last 30 days sums is because we need to recalculate the features everytime the monthly period expires, that happens when we receive a new event time that gose further in time (finishing one 30 days period and starting a new one)
 
 #### Item example:
 ```json
@@ -142,8 +142,30 @@ This table ensure the idempotency. With a small memory and reading cost, the sys
 
 ### Model artifact storage
 
+* The model scores high value customers, basically gives a score to customers predicting if they will be more prone to spend money in the future.
 * Trained models are saved as serialized artifacts (e.g. `artifacts/high_value_customer_model.json`).
 * Everytime we train a new model, the old one is versioned usign the timestamp of the training execution so it can be used in the future again.
+
+Here you can see the hyperparameters used for the training, whith a breif explaination:
+```
+ model = xgb.XGBClassifier(
+        objective="binary:logistic", #we need a binary classification here
+        max_depth=3, # considering how simple are the features this is enough
+        n_estimators=100, # 100 estimators but with an early stop criteria
+        learning_rate=0.1,
+        eval_metric="auc",
+        random_state=42,
+        early_stopping_rounds=10, # this ensure us to use enough estimators until the accuracy on the validation set do not encrease for at least 10 rounds
+    )
+ ```
+
+ Due to the nature of the dataset itself, some artificial noise introduction was needed to avoid overfitting. Along with that, the early stopping and the removal of the feature on which I did the labelling also helped with avoiding overfitting (with an AUC that lays between 0.7 and 0.9, depending on the noise introduction).
+
+ In fact, initially I was achieving an almost perfect AUC, very close to 1. I realised that this was caused by the random nature of the data, and decided first to increase the number of customers and their transactions (from 10 to 100 customers, and from 5 to 20 events). Then I introduced the noise and used the eraly stopping technique. 
+ In this way the model is able to score the high value customers (prone to spend more) better.
+
+ > **IMPORTANT**
+ > To label data I used a fixed threshold. I chose it by trials, seeing which one gave me a bettere separation of labels. My main problem was that if chosen poorly, the labels were only of one type, not allowing the trining. I could have tried different methods (average total spending of customers for example or an approach with percentiles), but I think in this case wouldn't make sense, considering the nature of the data.
 
 ---
 
