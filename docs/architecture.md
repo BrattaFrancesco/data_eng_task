@@ -61,8 +61,8 @@ The system is conceptually organized around one Kafka topic:
 
 ### Ordering strategy
 
-* The window function (simulated) partitions by customer_id, which ensures that all events for the same customer are delivered to the same partition, giving us per-customer ordering. In our case we just process all customers with the same ID within a 5-minutes interval.
-* Still, given the random shuffle I did in the simulated input, some events arrive late. Keeping track of the last event_time, the system is able to evict outdated amounts that are out of the 30 days window, using `evict_old_events()`.
+* The window function (simulated) partitions by customer_id, which ensures that all events for the same customer are delivered to the same partition, giving us per-customer ordering. In this case customers with the same ID are processed within a 5-minutes interval.
+* Still, given the random shuffle present in the generator, some events arrive late. Keeping track of the last event_time, the system is able to evict outdated amounts that are out of the 30 days window, using `evict_old_events()`.
 
 ---
 
@@ -75,7 +75,7 @@ The system uses a DynamoDB-style key-value store (simulated in memory).
 #### Table: `balances`
 
 > **Note** 
-> In the current implementation this informations are stored in one single table, as you can see in the item example. This is a design choice to simplify the development, since the architectural part was not covered in the assesment cretaria. In a real world scenario, the daily aggretates and the features should be included or not in the main table depending on the system requirements. It is obvious that this implementation is faster, since it doesn't require any join between tables, but is not scalable. In the schema I will show what conceptually makes more sense to me, but then as I said, in reality the implementation can change based on the system requirements.
+> In the current implementation this information are stored in one single table, as you can see in the item example. This is a design choice to simplify the development, since the architectural part was not covered in the assesment cretaria. In a real world scenario, the daily aggretates and the features should be included or not in the main table depending on the system requirements. It is obvious that this implementation is faster, since it doesn't require any join between tables, but is not scalable. The schema is conceptually more correct, but in reality the implementation can change based on the system requirements. We should also take in consideration that we are working with a NoSQL database, so changing the schema in the future is not a big deal.
 
 ##### Customer
 | Attribute    | Type | Description |
@@ -133,7 +133,7 @@ This table ensures the idempotency. With a small memory and reading cost, the sy
 
 ### Concurrent updates
 
-* In our toy system, there are no concurrent updates to manage, considering that we have one single program, with one single process.
+* In this implementation there are no concurrent updates to manage, considering that we have one single program, with one single process.
 * In a real DynamoDB setup, concurrency would be handled using Optimistic locking. Optimistic locking uses a version number on each item to ensure updates only succeed if the item hasn’t been modified by others, preventing accidental overwrites and requiring a retry if a version mismatch occurs.
 * This prevents lost updates when multiple consumers process the same customer concurrently.
 
@@ -145,7 +145,7 @@ This table ensures the idempotency. With a small memory and reading cost, the sy
 
 * The model scores high value customers, gives a score to customers predicting if they will be more prone to spend money in the future.
 * Trained models are saved as serialized artifacts (e.g. `artifacts/high_value_customer_model.json`).
-* Every time we train a new model, the old one is versioned using the timestamp of the training execution so it can be used in the future again.
+* Every time a new model is trained, the old one is versioned using the timestamp of the training execution so it can be used in the future again.
 
 Here you can see the hyperparameters used for the training, whith a brief explaination:
 ```
@@ -160,13 +160,13 @@ Here you can see the hyperparameters used for the training, whith a brief explai
     )
  ```
 
- Due to the nature of the dataset itself, some artificial noise introduction was needed to avoid overfitting. Along with that, the early stopping and the removal of the feature on which I did the labelling also helped with avoiding overfitting (with an AUC that lays between 0.7 and 0.9, depending on the noise introduction).
+ Due to the nature of the dataset itself, some artificial noise introduction was needed to avoid overfitting. Along with that, the early stopping and the removal of the feature on which the labelling was done also helped with avoiding overfitting (with an AUC that lays between 0.7 and 0.9, depending on the noise introduction).
 
- In fact, initially I was achieving an almost perfect AUC, very close to 1. I realised that this was caused by the random nature of the data, and decided first to increase the number of customers and their transactions (from 10 to 100 customers, and from 5 to 20 events). Then I introduced the noise and used the early stopping technique. 
+ In fact, initially an almost perfect AUC was achieved, very close to 1. Probably this was caused by the random nature of the data, and it was decided first to increase the number of customers and their transactions (from 10 to 100 customers, and from 5 to 20 events), then artificial noise was introduced coupled with an early stopping technique. 
  In this way the model is able to score the high value customers (prone to spend more) better.
 
  > **IMPORTANT**
- > To label data I used a fixed threshold. I chose it by trials, seeing which one gave me a better separation of labels. My main problem was that if chosen poorly, the labels were only of one type, not allowing the training. I could have tried different methods (average total spending of customers for example or an approach with percentiles), but I think in this case it wouldn't make sense, considering the nature of the data.
+ > To label data a threshold was fixed. It was chose by trials, seeing which one gave a better separation of labels. The main problem was that if chosen poorly, the labels were only of one type, not allowing the training. Different methods could have been used (average total spending of customers for example or an approach with percentiles), but in this case it wouldn't make sense, considering the nature of the data.
 
 ---
 
@@ -176,7 +176,7 @@ Here you can see the hyperparameters used for the training, whith a brief explai
 
   * updating the model artifact reference using the function `train()`
   * binding a folder at container running time using the command:
-  `docker run --mount type=bind,src=./artifacts,dst=/artifacts streaming-score`, in this way we bind a host local folder to the container one in order to update the model whenever we want
+  `docker run --mount type=bind,src=./artifacts,dst=/artifacts streaming-score`, in this way a host local folder is binded to the container one in order to update the model whenever we want
   * restarting the scoring service/container
 * Rollback is achieved by switching back to a previous model artifact
 
@@ -191,7 +191,7 @@ Here you can see the hyperparameters used for the training, whith a brief explai
 * Since the system is simulated using a random generator, it doesn't actually read events from a log, but it can produce the same input setting a seed in the `simulated_kafka_stream()` function.
 
 > **Note**
-> The choice of random generated input was done in order to further train easily the model. In this way I didn't have to write manually the data, but generating it automatically, with my parameters of choice. The seed helped me to understand if the final features were calculated in the same way (setting up a seed forces the generator to produce always the same input, random is actually pseudorandom, but this we all know :P)
+> The choice of random generated input was done in order to further train easily the model. In this way it was avoided to write the data manually, but generated automatically, with parameters of choice. The seed helped to understand if the final features were calculated in the same way (setting up a seed forces the generator to produce always the same input, random is actually pseudorandom, but this we all know :P)
 
 This supports:
 
